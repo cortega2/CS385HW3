@@ -44,20 +44,55 @@ int main(int argc, char * argv[]){
 	fseek(file, 0, SEEK_SET);
 	fileData = (char *) malloc(flength+1);
 	fread(fileData, flength, 1, file);
+	fclose(file);
 
+	/*
 	long q;
 	for(q=0; q<flength; q++){
 		printf("%c",(fileData)[q]);
 	}
+	*/
+	
+	////////////////////////////////////////////////////////////////////test code<<<<<<<<<<<<<<<<<<<<<<
 	int foo = (int) (fileData)[0];
 	char poo = (fileData)[0];
 	printf("int %d: char: %c \n", foo, poo);
 	printf("%d\n",(int)sizeof(char));
 	printf("%d\n",(int)sizeof(int));
-	fclose(file);
+	int ddd = flength/numThreads;
+	printf("%d\n", ddd);
+	//end of test code<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+	//create 2darray that will be used by the threads 
+	int *intData[numThreads]; 
+	int x;
+	for(x=0; x<numThreads; x++){
+		if(x== numThreads - 1)
+			intData[x] = (int *) malloc(flength/numThreads + flength%numThreads);
+		else
+			intData[x] = (int *) malloc(flength/numThreads);
+	}
+    
+	//populate int 2darray with values from the file which are in the fileData array
+	int counter = 0;
+	for(x=0; x<numThreads; x++){
+		int limit;
+		int y;
+		if(x == numThreads - 1)
+			limit = flength/numThreads + flength%numThreads;
+		else
+			limit = flength/numThreads;
+
+		printf("LIMIT: %d\n", limit);
+		for(y=0; y<limit; y++){
+			intData[x][y] = (fileData)[counter];
+			printf("DATA IN [%d][%d] = [%d]\n", x, y, intData[x][y]);
+			printf("counter: %d\n", counter);
+			counter ++;
+		}
+	}
 
 	//Create threads
-	int x;
 	int temp =3;
 	for(x=0; x<numThreads; x++){
 		toTheThreads[x].id = x;
