@@ -9,6 +9,7 @@ char message[] = "hello";
 
 struct threadArgs{
 	int id;
+	long dataSize;
 	int *data;
 };
 
@@ -19,14 +20,8 @@ int main(int argc, char * argv[]){
 		return -1;
 	}
 
-	//create variables for threads
-	int numThreads = atoi(argv[2]);
-	int res;
-	pthread_t many_threads[numThreads];
-	struct threadArgs toTheThreads[numThreads];
-	void * thread_result;
-
 	//Read file
+	int numThreads = atoi(argv[2]);
 	FILE *file;
 	long flength;
 	char *fileData;
@@ -46,51 +41,41 @@ int main(int argc, char * argv[]){
 	fread(fileData, flength, 1, file);
 	fclose(file);
 
-	/*
-	long q;
-	for(q=0; q<flength; q++){
-		printf("%c",(fileData)[q]);
-	}
-	*/
-	
-	////////////////////////////////////////////////////////////////////test code<<<<<<<<<<<<<<<<<<<<<<
-	int foo = (int) (fileData)[0];
-	char poo = (fileData)[0];
-	printf("int %d: char: %c \n", foo, poo);
-	printf("%d\n",(int)sizeof(char));
-	printf("%d\n",(int)sizeof(int));
-	int ddd = flength/numThreads;
-	printf("%d\n", ddd);
-	//end of test code<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+	//create 2darray that will be used by the threads
 
-	//create 2darray that will be used by the threads 
 	int *intData[numThreads]; 
 	int x;
 	for(x=0; x<numThreads; x++){
 		if(x== numThreads - 1)
-			intData[x] = (int *) malloc(flength/numThreads + flength%numThreads);
+			intData[x] = (int *) malloc((flength/numThreads + flength%numThreads)*sizeof(int));			//if not evenly divisible
 		else
-			intData[x] = (int *) malloc(flength/numThreads);
+			intData[x] = (int *) malloc((flength/numThreads)*sizeof(int));
 	}
     
-	//populate int 2darray with values from the file which are in the fileData array
+	//populate int 2darray with values from the file which are in the fileData array and set pointer to the array in the struct
+	//that will be passed to each thread
+	struct threadArgs toTheThreads[numThreads];
 	int counter = 0;
 	for(x=0; x<numThreads; x++){
-		int limit;
-		int y;
+		long limit;
+		long y;
 		if(x == numThreads - 1)
-			limit = flength/numThreads + flength%numThreads;
+			limit = flength/numThreads + flength%numThreads;											//if not evenly divisible
 		else
 			limit = flength/numThreads;
 
-		printf("LIMIT: %d\n", limit);
 		for(y=0; y<limit; y++){
 			intData[x][y] = (fileData)[counter];
-			printf("DATA IN [%d][%d] = [%d]\n", x, y, intData[x][y]);
-			printf("counter: %d\n", counter);
 			counter ++;
 		}
+		toTheThreads[x].data = intData[x];
+		toTheThreads[x].dataSize = limit;
 	}
+	
+	//create variables for threads
+	int res;
+	pthread_t many_threads[numThreads];
+	void * thread_result;
 
 	//Create threads
 	int temp =3;
@@ -101,9 +86,7 @@ int main(int argc, char * argv[]){
 			perror("Thread creation failed");
 			exit(EXIT_FAILURE);
 		}
-		sleep(1);
-	}
-	
+	}	
 	printf("Waiting for the thread to finish\n");
 	for(x=numThreads-1; x >= 0; x--){
 
@@ -120,10 +103,17 @@ int main(int argc, char * argv[]){
 }
 
 void * thread_function(void * arg){
-	//printf();
 	struct threadArgs vars = *(struct threadArgs *) arg;
-	printf("thread_function is running. Argument was %d\n", vars.id);
-	sleep(3);
-	//strcpy(message, "Bye!");
+	
+	//calculate average
+	long size = vars.dataSize;
+	long average = 0;
+	long x;
+	for(x = 0; x<size; x++){
+		average = average + vars.data[x];
+	}
+	average = average/size;
+	printf("Thread ID[%d] Average: %ld\n", vars.id, average);
+
 	pthread_exit("Thank you for the cpu time");
 }
