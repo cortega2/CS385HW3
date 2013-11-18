@@ -234,6 +234,47 @@ void * thread_function(void * arg){
 		lowStdChangeDev = LocalStdChangeDev;
 	sem_post(&sems[6]);
 
+	//try and visualize 
+	unsigned int avgs[80];
+	char symbols[80];
+	long chunkSize = size/80;
+	int curPos = 0;
+	for(x = 0; x < 80; x++){
+		int q;
+		unsigned long sum = 0;
+		for(q = 0; q < chunkSize; q++){
+			sum = sum + vars.data[curPos];
+			curPos++;
+		}
+
+		avgs[x] = sum/chunkSize;
+		
+		if(avgs[x] >= 0 && avgs[x] < 25)
+			symbols[x] = 'w';
+		else if(avgs[x] >= 25 && avgs[x] < 50)
+			symbols[x] = 'x';
+		else if(avgs[x] >= 50 && avgs[x] < 75)
+			symbols[x] = 'z';
+		else if(avgs[x] >= 75 && avgs[x] < 100)
+			symbols[x] = '@';
+		else if(avgs[x] >= 100 && avgs[x] < 125)
+			symbols[x] = '#';
+		else if(avgs[x] >= 125 && avgs[x] < 150)
+			symbols[x] = '$';
+		else if(avgs[x] >= 150 && avgs[x] < 175)
+			symbols[x] = '%';
+		else if(avgs[x] >= 175 && avgs[x] < 200)
+			symbols[x] = '&';
+		else if(avgs[x] >= 200 && avgs[x] < 225)
+			symbols[x] = '*';
+		else
+			symbols[x] = '=';
+	}
+
+	for(x = 0; x< 80; x++){
+		printf("[%d]", avgs[x]);
+	}
+	printf("\n%s\n", symbols);
 
 	pthread_exit("Thank you for the cpu time");
 }
