@@ -4,12 +4,16 @@
 #include <string.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <sys/msg.h>
 #include <math.h>
 
+#define MSG_RW 0600 | IPC_CREAT
 #define SEMNUM 7
 
 //globals
 void * thread_function(void * arg);
+void * thread_visual(void  * arg);
+const long int BYE = 1;
 sem_t sems[7];
 
 unsigned int highestAvg = 0;
@@ -25,6 +29,13 @@ struct threadArgs{
 	int id;
 	long dataSize;
 	int *data;
+	int msgID;
+};
+
+struct message{
+        long int type;
+        int ID;
+        char symbols[81];
 };
 
 int main(int argc, char * argv[]){
@@ -104,10 +115,32 @@ int main(int argc, char * argv[]){
 		}
 	}
 
+	//create message queue
+    int msgID = msgget(IPC_PRIVATE, MSG_RW);
+    if(msgID == -1){
+   	    printf("msgget error\n");
+        return -1;
+    }
+    else
+  		printf("Created a MSG queue, ID: %d\n", msgID);
+
+  	//create visualization 2d array and struct for thread that will handle messages
+  	struct threadArgs messageArgs;
+  	messageArgs.id = numThreads;
+  	messageArgs.msgID = msgID;
+
 	//Create threads
-	int temp =3;
+  	pthread_t messageThread;
+  	res = pthread_create(&(messageThread), NULL, thread_visual, (void *)&messageArgs);
+		if(res != 0){
+			perror("Thread creation failed");
+			exit(EXIT_FAILURE);
+		}
+
 	for(x=0; x<numThreads; x++){
 		toTheThreads[x].id = x;
+		toTheThreads[x].msgID = msgID;
+
 		res = pthread_create(&(many_threads[x]), NULL, thread_function, (void *)&toTheThreads[x]);
 		if(res != 0){
 			perror("Thread creation failed");
@@ -125,6 +158,11 @@ int main(int argc, char * argv[]){
 			exit(EXIT_FAILURE);
 		}
 	}
+	res = pthread_join(messageThread, &thread_result);
+		if( res != 0){
+			perror("Thread joining failed");
+			exit(EXIT_FAILURE);
+		}
 
 	printf("Highest Average: %d\n", highestAvg);	
 	printf("Lowest Average: %d\n", lowestAvg);
@@ -135,13 +173,48 @@ int main(int argc, char * argv[]){
 	printf("Min Std Dev of Data Change: %f\n", lowStdChangeDev);
 	printf("Done! \n");
 
+	//clean up
 	for(x = 0; x < SEMNUM; x++)
 		sem_destroy(&sems[x]);
+	msgctl(msgID, IPC_RMID, NULL);
 
 	exit(EXIT_SUCCESS);
 }
 
-void * thread_function(void * arg){
+void *thread_visual(void *arg){
+	struct threadArgs vars = *(struct threadArgs *) arg;
+	char visuals[vars.id][81];
+
+	int count = vars.id;
+	while(count){
+		struct message recieve;
+		if(msgrcv(vars.msgID, &recieve, sizeof(struct message) - sizeof(long int), 0, 0) < 0){
+         	perror("ERROR RECIEVING START MESSAGE\n");
+           	exit(EXIT_FAILURE);
+       	}
+
+       	if(recieve.type == BYE){
+            printf("End message from THREAD[%d]\n", recieve.ID);
+            printf("%s\n", recieve.symbols);
+            strcpy(visuals[recieve.ID], recieve.symbols);
+        	count--;
+        }
+
+	}
+
+	int x;
+	printf("\n\nHow the data looks together:\n");
+	for(x = 0; x < vars.id; x++){
+		int q;
+		for(q = 0; q<81; q++)
+			printf("%c",visuals[x][q]);
+		printf("\n");
+	}
+	printf("\n");
+	pthread_exit("Thank you for the cpu time");
+}
+
+void *thread_function(void *arg){
 	struct threadArgs vars = *(struct threadArgs *) arg;
 	
 	//calculate average and range and change
@@ -174,24 +247,30 @@ void * thread_function(void * arg){
 	Localrange = highest - lowest;
 
 	//update highest average
-	sem_wait(&sems[0]);
-	if(average > highestAvg)
-	highestAvg = average;
-	sem_post(&sems[0]);
-
+	if(highestAvg < 255){
+		sem_wait(&sems[0]);
+		if(average > highestAvg)
+		highestAvg = average;
+		sem_post(&sems[0]);
+	}
+	
 	//update lowest average
-	sem_wait(&sems[1]);
-	if(average < lowestAvg)
-		lowestAvg = average;
-	sem_post(&sems[1]);
+	if(lowestAvg > 0){
+		sem_wait(&sems[1]);
+		if(average < lowestAvg)
+			lowestAvg = average;
+		sem_post(&sems[1]);
+	}
 
 	//update ranges
-	sem_wait(&sems[2]);
-	if(Localrange < range[0])
-		range[0] = Localrange;
-	if(Localrange > range[1])
-		range[1] = Localrange;
-	sem_post(&sems[2]);
+	if(range[0] > 0 || range[1] < 255){
+		sem_wait(&sems[2]);
+		if(Localrange < range[0])
+			range[0] = Localrange;
+		if(Localrange > range[1])
+			range[1] = Localrange;
+		sem_post(&sems[2]);
+	}
 
 	//update max changes
 	sem_wait(&sems[3]);
@@ -206,37 +285,45 @@ void * thread_function(void * arg){
 	sem_post(&sems[4]);
 
 	//find std dev
-	for(x = 0; x < size; x++)
-		diff = diff + (vars.data[x] - average) * (vars.data[x] - average);
+	if(lowStdDev > 0){
+		for(x = 0; x < size; x++)
+			diff = diff + (vars.data[x] - average) * (vars.data[x] - average);
 
-	LocalStdDev = sqrt((double)diff/size);
-	
-	sem_wait(&sems[5]);
-	if(LocalStdDev < lowStdDev)
-		lowStdDev = LocalStdDev;
-	sem_post(&sems[5]);
-
-	//find std dev of change of data
-	double LocalStdChangeDev = 0;
-	double changeDiff = 0.0;
-	double absSumAvg = 0.0;
-	for(x =0; x < size-1; x ++)
-		absSumAvg = absSumAvg + abs(vars.data[x] - vars.data[x+1]);
-	absSumAvg = (double)absSumAvg / (size-1);
-
-	for(x = 0; x < size -1 ;x++){
-		int absolute = abs(vars.data[x] - vars.data[x+1]);
-		changeDiff = changeDiff + (absolute - absSumAvg) * (absolute- absSumAvg);
+		LocalStdDev = sqrt((double)diff/size);
+		
+		sem_wait(&sems[5]);
+		if(LocalStdDev < lowStdDev)
+			lowStdDev = LocalStdDev;
+		sem_post(&sems[5]);
 	}
-	LocalStdChangeDev = sqrt(changeDiff / (size-1));
-	sem_wait(&sems[6]);
-	if(LocalStdChangeDev < lowStdChangeDev)
-		lowStdChangeDev = LocalStdChangeDev;
-	sem_post(&sems[6]);
+	
+	//find std dev of change of data
+	if(lowStdChangeDev > 0 ){
+		double LocalStdChangeDev = 0;
+		double changeDiff = 0.0;
+		double absSumAvg = 0.0;
+		for(x =0; x < size-1; x ++)
+			absSumAvg = absSumAvg + abs(vars.data[x] - vars.data[x+1]);
+		absSumAvg = (double)absSumAvg / (size-1);
 
-	//try and visualize 
+		for(x = 0; x < size -1 ;x++){
+			int absolute = abs(vars.data[x] - vars.data[x+1]);
+			changeDiff = changeDiff + (absolute - absSumAvg) * (absolute- absSumAvg);
+		}
+		LocalStdChangeDev = sqrt(changeDiff / (size-1));
+		sem_wait(&sems[6]);
+		if(LocalStdChangeDev < lowStdChangeDev)
+			lowStdChangeDev = LocalStdChangeDev;
+		sem_post(&sems[6]);
+	}
+
+	//try and visualize
+	struct message toSend;
+	toSend.type = BYE;
+	toSend.ID = vars.id;
+
 	unsigned int avgs[80];
-	char symbols[80];
+	char symbols[81];
 	long chunkSize = size/80;
 	int curPos = 0;
 	for(x = 0; x < 80; x++){
@@ -270,11 +357,14 @@ void * thread_function(void * arg){
 		else
 			symbols[x] = '=';
 	}
+	symbols[81] = '\0';
+	strcpy(toSend.symbols, symbols);
+	if(msgsnd(vars.msgID, &toSend, sizeof(struct message) - sizeof(long int), IPC_NOWAIT) < 0){
+       	perror("ERROR SENDING START MESSAGE!\n");
+       	exit(EXIT_FAILURE);
+    }
 
-	for(x = 0; x< 80; x++){
-		printf("[%d]", avgs[x]);
-	}
-	printf("\n%s\n", symbols);
+	//printf("%s\n", symbols);
 
 	pthread_exit("Thank you for the cpu time");
 }
